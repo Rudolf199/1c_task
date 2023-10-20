@@ -1,21 +1,31 @@
 #include <algorithm>
 #include <iostream>
+#include <unordered_map>
 #include <vector>
 
 enum CellState { UNVISITED, VISITED, WALL };
 enum Decision { FORWARD, TURN, FIRE };
 const int maze_size = 6;
 
+namespace std {
+template <>
+struct hash<std::pair<int, int>> {
+  size_t operator()(const std::pair<int, int>& p) const {
+    size_t h1 = std::hash<int>{}(p.first);
+    size_t h2 = std::hash<int>{}(p.second);
+    return h1 ^ (h2 << 1);
+  }
+};
+}  // namespace std
+
 class Player {
  private:
   int visited_count = 0;
-  std::vector<std::vector<CellState>> visited =
-      std::vector<std::vector<CellState>>(
-          maze_size, std::vector<CellState>(maze_size, WALL));
   std::vector<int> dx = {-1, 0, 1, 0};
   std::vector<int> dy = {0, 1, 0, -1};
   int x = 0;
   int y = 0;
+  std::unordered_map<std::pair<int, int>, CellState> VisitedMap;
   int time = 0;
   int dir_code = 0;
   int neigh_time = 0;
@@ -23,13 +33,26 @@ class Player {
   int fire_time = 0;
   int fire_K = 0;
   std::vector<std::vector<CellState>> GetLiveMap() {
-    // получаем карту
-    return;
+    std::vector<std::vector<CellState>> maze;
+    std::string line;
+    for (auto row_count = 0; row_count < 2 * fire_K + 1; row_count++) {
+      std::cin >> line;  // здесь система "выводит радар"
+      std::vector<CellState> row;
+      for (const auto c : line) {
+        if (c == '_') {
+          row.push_back(UNVISITED);
+        } else if (c == '#') {
+          row.push_back(WALL);
+        }
+      }
+      maze.push_back(row);
+    }
+    return maze;
   }
   std::pair<int, int> RealCoords(
       const std::vector<std::vector<CellState>>& map) {
-    // здесь считаем координаты на мини-карте
-    std::pair<int, int> res;
+    std::pair<int, int> res = {fire_K,
+                               fire_K};  // только понял, что там стены будут
     return res;
   }
   int AnalizeMap() {
@@ -46,7 +69,10 @@ class Player {
       int step = 1;
       while (map[RealCoords(map).first + step * dx[code]]
                 [RealCoords(map).second + step * dy[code]] != WALL) {
-        counter[code]++;
+        if (VisitedMap.find({x + step * dx[code], y + step * dy[code]}) ==
+            VisitedMap.end()) {
+          counter[code]++;
+        }
         step++;
       }
     }
@@ -56,15 +82,29 @@ class Player {
   }
 
  public:
-  void MakeDecision(const std::vector<std::vector<CellState>>& Map,
-                    int step_code) {
+  void MakeDecision(int step_code) {
     time += neigh_time;
     if (step_code == 1) {
+      if (VisitedMap.find({x + dx[dir_code], y + dy[dir_code]}) ==
+          VisitedMap.end()) {
+        x += dx[dir_code];
+        y += dy[dir_code];
+        visited_count++;
+        std::cout << "1\n";
+        // visited[x][y] = VISITED;
+        VisitedMap[{x, y}] = VISITED;
+        return;
+      }
       x += dx[dir_code];
       y += dy[dir_code];
-      visited_count++;
       std::cout << "1\n";
-      visited[x][y] = VISITED;
+      time += fire_time;
+      auto old_code = dir_code;
+      dir_code = AnalizeMap();
+      if (dir_code != old_code) {
+        std::cout << "2, " << static_cast<int>(old_code < dir_code) << "\n";
+        time += ninety_time;
+      }
       return;
     }
     std::cout << "0\n";  // уперлись в стену, надо искать путь
@@ -74,6 +114,43 @@ class Player {
     std::cout << "2, " << static_cast<int>(old_code < dir_code)
               << "\n";  // сделали поворот в лучшем направлении
     time += ninety_time;
+  }
+  bool Finished() {
+    auto map = GetLiveMap();
+    int wall_or_unvisited_count = 0;
+    for (int dir = 0; dir < 4; ++dir) {
+      if (map[fire_K + dx[dir]][fire_K + dy[dir]] == WALL) {
+        wall_or_unvisited_count++;
+      }
+      if (VisitedMap.find({x + dx[dir], y + dy[dir]}) != VisitedMap.end()) {
+        wall_or_unvisited_count++;
+      }
+    }
+    if (map[fire_K - 1][fire_K - 1] == WALL) {
+      wall_or_unvisited_count++;
+    }
+    if (map[fire_K + 1][fire_K + 1] == WALL) {
+      wall_or_unvisited_count++;
+    }
+    if (map[fire_K - 1][fire_K + 1] == WALL) {
+      wall_or_unvisited_count++;
+    }
+    if (map[fire_K + 1][fire_K - 1] == WALL) {
+      wall_or_unvisited_count++;
+    }
+    if (VisitedMap.find({x + 1, y + 1}) != VisitedMap.end()) {
+      wall_or_unvisited_count++;
+    }
+    if (VisitedMap.find({x + 1, y - 1}) != VisitedMap.end()) {
+      wall_or_unvisited_count++;
+    }
+    if (VisitedMap.find({x - 1, y + 1}) != VisitedMap.end()) {
+      wall_or_unvisited_count++;
+    }
+    if (VisitedMap.find({x - 1, y - 1}) != VisitedMap.end()) {
+      wall_or_unvisited_count++;
+    }
+    return (wall_or_unvisited_count == 8);
   }
   Player(int& x_0, int& y_0, int& x_1, int& y_1, int& neigh_time,
          int& ninety_time, int& fire_time, int& fire_K)
@@ -94,10 +171,8 @@ class Player {
   int DirX() { return x + dx[dir_code]; }
   int DirY() { return y + dx[dir_code]; }
   int Time() { return time; }
-  void Mark() { visited[x][y] = VISITED; }
 
  public:
-  auto Visited() { return visited; }
   auto CellCount() { return visited_count; }
 };
 
@@ -112,41 +187,11 @@ class Game {
   int fire_time = 0;
   int fire_K = 0;
   int space = 0;
-  std::vector<std::vector<CellState>> real_maze = {
-      {WALL, VISITED, WALL, VISITED, WALL, VISITED},
-      {VISITED, WALL, VISITED, WALL, VISITED, WALL},
-      {WALL, VISITED, WALL, VISITED, WALL, VISITED},
-      {VISITED, WALL, VISITED, WALL, VISITED, WALL},
-      {WALL, VISITED, WALL, VISITED, WALL, VISITED},
-      {VISITED, WALL, VISITED, WALL, VISITED,
-       WALL}};  // ну пусть система автоматически сравнивает со своим
-                // лабиринтом(чисто для примера)
   Player minotaurs;
   bool CanMove(int X, int Y) {
-    if (X < 0 || X > real_maze.size() || Y < 0 || Y > real_maze[0].size()) {
-      return false;
-    }
-    if (real_maze[X][Y] == WALL) {
-      return false;
-    }
-    return true;
-  }
-  std::vector<std::vector<CellState>> SendLiveMap() {
-    std::vector<std::vector<CellState>> maze;
-    std::string line;
-    for (auto row_count = 0; row_count < 2 * fire_K + 1; row_count++) {
-      std::cin >> line;  // здесь система "выводит радар"
-      std::vector<CellState> row;
-      for (const auto c : line) {
-        if (c == '_') {
-          row.push_back(UNVISITED);
-        } else if (c == '#') {
-          row.push_back(WALL);
-        }
-      }
-      maze.push_back(row);
-    }
-    return maze;
+    int can_move = 0;
+    std::cin >> can_move;  // система говорит можем двигаться или нет
+    return static_cast<bool>(can_move);
   }
 
  public:
@@ -166,15 +211,12 @@ class Game {
   void Play() {
     int action = 0;
     while (true) {
-      if (minotaurs.CellCount() == space) {
-        if (minotaurs.Visited() == real_maze) {
-          std::cout << "4"
-                    << "за " << minotaurs.Time() << "\n";
-          break;
-        }
+      if (minotaurs.Finished()) {
+        std::cout << "4"
+                  << "за " << minotaurs.Time() << "\n";
+        break;
       }
-      minotaurs.MakeDecision(SendLiveMap(),
-                             CanMove(minotaurs.DirX(), minotaurs.DirY()));
+      minotaurs.MakeDecision(CanMove(minotaurs.DirX(), minotaurs.DirY()));
     }
   }
 };
@@ -195,5 +237,9 @@ void GameRun() {
   int neigh_time = 0, ninety_time = 0, fire_time = 0, fire_K = 0;
   InitTimes(neigh_time, ninety_time, fire_time, fire_K);
   Game game(x_0, y_0, x_1, y_1, neigh_time, ninety_time, fire_time, fire_K);
+  game.Play();
 }
-int main() { return 0; }
+int main() {
+  GameRun();
+  return 0;
+}
